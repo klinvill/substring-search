@@ -8,6 +8,11 @@ pub fn substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
     naive_substring(s1, s2, k)
 }
 
+/// Given two strings, returns if there is a common substring of length k.
+pub fn has_substring(s1: &str, s2: &str, k: usize) -> bool {
+    substring(s1, s2, k).is_some()
+}
+
 /// Naive implementation of substring search. Sticks all k-length substrings of first in a hashmap,
 /// then checks all the k-length substrings in s2 to see if any are already in the hashmap. Runs
 /// in ~O(n) time (n-k+1 insertions for substrings in s1 (where n is the length of s1), up to
