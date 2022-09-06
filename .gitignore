@@ -1,0 +1,7 @@
+/target
+
+# Mac files
+.DS_Store
+
+# Jetbrains files
+.idea
