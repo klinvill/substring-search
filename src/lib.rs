@@ -5,7 +5,7 @@ use std::collections::HashSet;
 ///
 /// This function uses a hashmap (as per the assignment guidelines).
 pub fn substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
-    naive_substring(s1, s2, k)
+    _naive_prereserve_substring(s1, s2, k)
 }
 
 /// Given two strings, returns if there is a common substring of length k.
@@ -17,7 +17,8 @@ pub fn has_substring(s1: &str, s2: &str, k: usize) -> bool {
 /// then checks all the k-length substrings in s2 to see if any are already in the hashmap. Runs
 /// in ~O(n) time (n-k+1 insertions for substrings in s1 (where n is the length of s1), up to
 /// n-k+1 queries for substrings in s2 (where n is the length of s2)).
-fn naive_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _naive_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
     // Trivial to have matching substrings of length 0
     if k == 0 {
         // In this case we opt to return the empty string. Another implementation could return None
@@ -62,6 +63,59 @@ fn naive_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
     return None;
 }
 
+
+/// Naive implementation of substring search. Sticks all k-length substrings of first in a hashmap,
+/// then checks all the k-length substrings in s2 to see if any are already in the hashmap. Runs
+/// in ~O(n) time (n-k+1 insertions for substrings in s1 (where n is the length of s1), up to
+/// n-k+1 queries for substrings in s2 (where n is the length of s2)). This function pre-reserves
+/// the needed size of the hash table up front so rehashing is not needed.
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _naive_prereserve_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // Trivial to have matching substrings of length 0
+    if k == 0 {
+        // In this case we opt to return the empty string. Another implementation could return None
+        // instead.
+        return Some("");
+    }
+
+    // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
+    // the UTF-8 characters (unicode scalar values). We also keep track of the original indices in
+    // s1 and s2 so we can more efficiently get substrings (without having to create new strings).
+    let (cis1, cs1): (Vec<usize>, Vec<char>) = s1.char_indices().unzip();
+    let (cis2, cs2): (Vec<usize>, Vec<char>) = s2.char_indices().unzip();
+
+    // Impossible to have a substring longer than the original strings.
+    if cs1.len() < k || cs2.len() < k {
+        return None;
+    }
+
+    // Note: with_capacity() guarantees that the hash map can hold at least `capacity` elements
+    // without reallocating.
+    let mut substrings = HashSet::with_capacity(std::cmp::max(cs1.len(), cs2.len()));
+    for i in 0..(cs1.len()-k+1) {
+        let start = cis1[i];
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let end = *cis1.get(i+k).unwrap_or(&s1.len());
+        let sub = &s1[start..end];
+        substrings.insert(sub);
+    }
+
+    for i in 0..(cs2.len()-k+1) {
+        let start = cis2[i];
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let end = *cis2.get(i+k).unwrap_or(&s2.len());
+        let sub = &s2[start..end];
+        if substrings.contains(sub) {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub);
+        }
+    }
+
+    // No substring of length k in s2 is also in s1.
+    return None;
+}
 
 #[cfg(test)]
 mod tests {
