@@ -93,7 +93,7 @@ pub fn _naive_prereserve_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Op
 
     // Note: with_capacity() guarantees that the hash map can hold at least `capacity` elements
     // without reallocating.
-    let mut substrings = HashSet::with_capacity(std::cmp::max(cs1.len(), cs2.len()));
+    let mut substrings = HashSet::with_capacity(cs1.len());
     for i in 0..(cs1.len()-k+1) {
         let start = cis1[i];
         // Normally we want to read the bytes up until the start of the next character, but when
@@ -150,7 +150,7 @@ pub fn _naive_prereserve_iter_substring<'a>(s1: &'a str, s2: &'a str, k: usize) 
 
     // Note: with_capacity() guarantees that the hash map can hold at least `capacity` elements
     // without reallocating.
-    let mut substrings = HashSet::with_capacity(std::cmp::max(cs1_len, cs2_len));
+    let mut substrings = HashSet::with_capacity(cs1_len);
     // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
     // push_back()).
     let mut sub_cs1_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
@@ -231,7 +231,7 @@ pub fn _naive_prereserve_iter_fx_substring<'a>(s1: &'a str, s2: &'a str, k: usiz
     // Note: we reserve space to guarantee that the hash map can hold at least `capacity` elements
     // without reallocating.
     let mut substrings = FxHashSet::default();
-    substrings.reserve(std::cmp::max(cs1_len, cs2_len));
+    substrings.reserve(cs1_len);
     // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
     // push_back()).
     let mut sub_cs1_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
@@ -273,6 +273,93 @@ pub fn _naive_prereserve_iter_fx_substring<'a>(s1: &'a str, s2: &'a str, k: usiz
     }
     // Sanity check to make sure we've read all the characters
     assert!(cs2.next().is_none());
+
+    // No substring of length k in s2 is also in s1.
+    return None;
+}
+
+/// Naive implementation of substring search. Sticks all k-length substrings of the shortest string
+/// in a hashmap, then checks all the k-length substrings in the other string to see if any are
+/// already in the hashmap. Runs in ~O(n) time (n-k+1 insertions for substrings in the shorter
+/// string (where n is the length of the string), up to n-k+1 queries for substrings in the other
+/// string (where n is the length of the string)). This function pre-reserves the needed size of
+/// the hash table up front so rehashing is not needed. It also uses the char_indices() iterator
+/// directly instead of copying it to a vec for better performance. This function also uses the
+/// firefox hashing algorithm which is faster than Rust's default SIP hashing algorithm at the cost
+/// of reduced resilience against an adversarial user.
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _naive_prereserve_iter_fx_shorter_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // Trivial to have matching substrings of length 0
+    if k == 0 {
+        // In this case we opt to return the empty string. Another implementation could return None
+        // instead.
+        return Some("");
+    }
+
+    // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
+    // the UTF-8 characters (unicode scalar values). We also keep track of the original indices in
+    // s1 and s2 so we can more efficiently get substrings (without having to create new strings).
+    // We use the iterators directly instead of extracting to a vec for better performance.
+    let cs1_len = s1.chars().count();
+    let cs2_len = s2.chars().count();
+
+    // Impossible to have a substring longer than the original strings.
+    if cs1_len < k || cs2_len < k {
+        return None;
+    }
+
+    // Choose shorter string to be the one we store in the hash table
+    let (shorter, longer) = if cs1_len <= cs2_len {(s1, s2)} else {(s2, s1)};
+    let (cs_short_len, cs_long_len) = if cs1_len <= cs2_len {(cs1_len, cs2_len)} else {(cs2_len, cs1_len)};
+
+    let mut cs_short = shorter.char_indices();
+    let mut cs_long = longer.char_indices();
+
+    // Note: we reserve space to guarantee that the hash map can hold at least `capacity` elements
+    // without reallocating.
+    let mut substrings = FxHashSet::default();
+    substrings.reserve(cs_short_len);
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()).
+    let mut sub_cs_short_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
+    let mut sub_cs_long_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i1, _) = cs_short.next().unwrap();
+        sub_cs_short_ind.push_back(i1);
+        let (i2, _) = cs_long.next().unwrap();
+        sub_cs_long_ind.push_back(i2);
+    }
+
+    // Helper function to fetch the next substring using a stateful sliding window (sub_indices) of
+    // character indices.
+    fn next_substring<'b>(cs: &mut CharIndices, sub_indices: &mut VecDeque<usize>, source: &'b str) -> &'b str {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        sub_indices.push_back(i);
+        let start = sub_indices.pop_front().unwrap();
+        let end = *sub_indices.back().unwrap();
+        let sub = &source[start..end];
+        sub
+    }
+
+    for _ in k..cs_short_len+1 {
+        let sub = next_substring(&mut cs_short, &mut sub_cs_short_ind, shorter);
+        substrings.insert(sub);
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(cs_short.next().is_none());
+
+    for _ in k..cs_long_len+1 {
+        let sub = next_substring(&mut cs_long, &mut sub_cs_long_ind, longer);
+        if substrings.contains(sub) {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub);
+        }
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(cs_long.next().is_none());
 
     // No substring of length k in s2 is also in s1.
     return None;
