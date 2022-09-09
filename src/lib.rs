@@ -1,3 +1,5 @@
+pub mod helpers;
+
 use std::collections::{HashSet, VecDeque};
 use std::str::CharIndices;
 use rustc_hash::FxHashSet;

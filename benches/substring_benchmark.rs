@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use itertools::Itertools;
 use substring_search::{substring, _naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring};
+use substring_search::helpers::preprocess_string;
 
 #[derive(Clone)]
 struct File {
@@ -34,8 +35,10 @@ pub fn bench_substring(c: &mut Criterion) {
         test_files.iter().tuple_combinations().for_each(|(f1, f2)| {
             let f1_name = f1.file_name();
             let f2_name = f2.file_name();
-            let s1 = std::fs::read_to_string(f1.path()).unwrap();
-            let s2 = std::fs::read_to_string(f2.path()).unwrap();
+            // Note: we only preprocess the strings in the benchmarks (rather than in the substring
+            // functions themselves) to preserve generality.
+            let s1 = preprocess_string(&std::fs::read_to_string(f1.path()).unwrap());
+            let s2 = preprocess_string(&std::fs::read_to_string(f2.path()).unwrap());
             c.bench_function(&format!("{}_{}", f1_name.to_str().unwrap(), f2_name.to_str().unwrap()), |b| b.iter(|| {
                 substring(black_box(&s1), black_box(&s2), black_box(20))
             }));
@@ -107,8 +110,10 @@ pub fn bench_substring_impls<'a>(c: &mut Criterion) {
     }));
 
     for (f1, f2) in test_file_pairs {
-        let s1 = std::fs::read_to_string(f1.path.clone()).unwrap();
-        let s2 = std::fs::read_to_string(f2.path.clone()).unwrap();
+        // Note: we only preprocess the strings in the benchmarks (rather than in the substring
+        // functions themselves) to preserve generality.
+        let s1 = preprocess_string(&std::fs::read_to_string(f1.path.clone()).unwrap());
+        let s2 = preprocess_string(&std::fs::read_to_string(f2.path.clone()).unwrap());
         group.bench_with_input(
             BenchmarkId::new("naive_substring", &format!("{}_{}", f1.name, f2.name)),
             &(&s1, &s2),
