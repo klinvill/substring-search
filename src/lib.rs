@@ -10,6 +10,18 @@ pub fn substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
     _naive_prereserve_iter_fx_substring(s1, s2, k)
 }
 
+/// Given two strings, returns the a common substring of length k or None if no such substring
+/// exists. If there are multiple common substrings, this function does not guarantee which will be
+/// returned.
+///
+/// This function runs much faster than `substring()` if a common substring is early on in both
+/// strings, but otherwise tends to run slower.
+///
+/// This function uses a hashmap (as per the assignment guidelines).
+pub fn unordered_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    _alternate_prereserve_iter_fx_substring(s1, s2, k)
+}
+
 /// Given two strings, returns if there is a common substring of length k.
 pub fn has_substring(s1: &str, s2: &str, k: usize) -> bool {
     substring(s1, s2, k).is_some()
@@ -365,12 +377,131 @@ pub fn _naive_prereserve_iter_fx_shorter_substring<'a>(s1: &'a str, s2: &'a str,
     return None;
 }
 
+/// Implementation of substring search that uses two hash tables to store seen substrings. It
+/// alternates between insertion and checking for each of the two strings with the idea that
+/// matching substrings may often be found early in very long strings. As a result, fewer insertions
+/// (which currently dominate the running time) should be needed on average. Runs in ~O(n) time
+/// (up to n-k+1 insertions and queries for each string (where n is the length of the string)).
+///
+/// Unlike previous implementations, this implementation does not guarantee that the first
+/// substring found is the first one in the second string that occurs anywhere in the first string.
+///
+/// The algorithm is correct because only three cases can occur:
+///     1) A substring appears later in the first string than in the second string
+///     2) A substring appears later in the second string than in the first string
+///     3) A substring appears at the same index in the first and second strings
+/// In the first case, the substring will already have been inserted into the second hash table so
+/// when it is reached in the first string, a lookup in the second hash table will show it is a
+/// matching substring. The second case works the same as the first, but using the first hash table.
+/// In the third case, since we ensure that insertions happen before lookups, the substring will
+/// already be inserted into both hash tables. A lookup into either suffices to show it is a
+/// matching substring.
+///
+/// This function pre-reserves the needed size of the hash table up front so rehashing is not
+/// needed. It also uses the char_indices() iterator directly instead of copying it to a vec for
+/// better performance. This function also uses the firefox hashing algorithm which is faster than
+/// Rust's  default SIP hashing algorithm at the cost of reduced resilience against an adversarial
+/// user.
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _alternate_prereserve_iter_fx_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // Trivial to have matching substrings of length 0
+    if k == 0 {
+        // In this case we opt to return the empty string. Another implementation could return None
+        // instead.
+        return Some("");
+    }
+
+    // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
+    // the UTF-8 characters (unicode scalar values). We also keep track of the original indices in
+    // s1 and s2 so we can more efficiently get substrings (without having to create new strings).
+    // We use the iterators directly instead of extracting to a vec for better performance.
+    let cs1_len = s1.chars().count();
+    let cs2_len = s2.chars().count();
+    let mut cs1 = s1.char_indices();
+    let mut cs2 = s2.char_indices();
+
+    // Impossible to have a substring longer than the original strings.
+    if cs1_len < k || cs2_len < k {
+        return None;
+    }
+
+    // Note: we reserve space to guarantee that the hash map can hold at least `capacity` elements
+    // without reallocating.
+    let mut substrings1 = FxHashSet::default();
+    substrings1.reserve(cs1_len);
+    let mut substrings2 = FxHashSet::default();
+    substrings2.reserve(cs2_len);
+
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()).
+    let mut sub_cs1_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
+    let mut sub_cs2_ind: VecDeque<usize> = VecDeque::with_capacity(k+1);
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i1, _) = cs1.next().unwrap();
+        sub_cs1_ind.push_back(i1);
+        let (i2, _) = cs2.next().unwrap();
+        sub_cs2_ind.push_back(i2);
+    }
+
+    // Helper function to fetch the next substring using a stateful sliding window (sub_indices) of
+    // character indices.
+    fn next_substring<'b>(cs: &mut CharIndices, sub_indices: &mut VecDeque<usize>, source: &'b str) -> &'b str {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        sub_indices.push_back(i);
+        let start = sub_indices.pop_front().unwrap();
+        let end = *sub_indices.back().unwrap();
+        let sub = &source[start..end];
+        sub
+    }
+
+    for _ in k..std::cmp::min(cs1_len, cs2_len)+1 {
+        // Insert next substring
+        let sub1 = next_substring(&mut cs1, &mut sub_cs1_ind, s1);
+        substrings1.insert(sub1);
+        let sub2 = next_substring(&mut cs2, &mut sub_cs2_ind, s2);
+        substrings2.insert(sub2);
+
+        // Then check to see if that substring has been before in the other string. We need to
+        // insert before checking to make sure we don't end up in a case where a matching substring
+        // is deemed not to be matching because both strings insert it simultaneously after
+        // determining that it is not in the other yet, and may never be checked again.
+        if substrings2.contains(sub1) {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub1);
+        } else if substrings1.contains(sub2) {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub2);
+        }
+    }
+
+    // One of the strings has been fully inserted, this means we only need to check substrings of
+    // the other to see if their in the fully inserted string.
+    let (longer, longer_ind, longer_s, shorter_table) = if cs1_len <= cs2_len {(&mut cs2, &mut sub_cs2_ind, s2, &substrings1)} else {(&mut cs1, &mut sub_cs1_ind, s1, &substrings2)};
+    for _ in std::cmp::min(cs1_len, cs2_len)+1..std::cmp::max(cs1_len, cs2_len)+1 {
+        let sub = next_substring(longer, longer_ind, longer_s);
+        if shorter_table.contains(sub) {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub);
+        }
+    }
+
+    // Sanity check to make sure we've read all the characters
+    assert!(cs1.next().is_none());
+    assert!(cs2.next().is_none());
+
+    // No substring of length k in s2 is also in s1.
+    return None;
+}
+
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
     use substring::Substring;
     use proptest::prelude::*;
-    use crate::substring;
+    use crate::{substring, unordered_substring};
 
     // Reference implementation for substring to compare against for correctness
     fn substring_reference_impl<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
@@ -397,6 +528,12 @@ mod tests {
         }
 
         return None
+    }
+
+    // Checks to see if the provided string `sub` is of length `k` and is a substring of `s1` and
+    // `s2`
+    fn unordered_substring_correct(sub: &str, s1: &str, s2: &str, k: usize) -> bool {
+        sub.chars().count() == k && s1.contains(sub) && s2.contains(sub)
     }
 
     // Proptest strategy to generate a random strings with length within range
@@ -527,6 +664,98 @@ mod tests {
             let expected_substring = substring_reference_impl(&s1, &s2, k);
             let r = substring(&s1, &s2, k);
             assert_eq!(r, expected_substring);
+        }
+    }
+
+    #[test]
+    fn test_substring_unordered() {
+        let s1 = "This is a test string. - Normal Person";
+        let s2 = "Here be another test string. Yaargh. - Pirate";
+        let k = 5;
+
+        let r = unordered_substring(s1, s2, k);
+        assert_eq!(r.is_some(), true);
+        assert_eq!(unordered_substring_correct(r.unwrap(), s1, s2, k), true);
+    }
+
+    #[test]
+    fn test_no_substring_unordered() {
+        let s1 = "This is a test string. - Normal Person";
+        let s2 = "Who lives in a pineapple under the sea? - Patchy";
+        let k = 5;
+        let expected_substring = None;
+
+        let r = unordered_substring(s1, s2, k);
+        assert_eq!(r, expected_substring);
+    }
+
+    #[test]
+    fn test_no_string_unordered() {
+        let s1 = "";
+        let s2 = "Who lives in a pineapple under the sea? - Patchy";
+        let k = 5;
+        let expected_substring = None;
+
+        let r = unordered_substring(s1, s2, k);
+        assert_eq!(r, expected_substring);
+    }
+
+    #[test]
+    fn test_no_k_unordered() {
+        let s1 = "This is a test string. - Normal Person";
+        let s2 = "Here be another test string. Yaargh. - Pirate";
+        let k = 0;
+        let expected_substring = Some("");
+
+        let r = unordered_substring(s1, s2, k);
+        assert_eq!(r, expected_substring);
+    }
+
+    #[test]
+    fn test_string_of_length_k_unordered() {
+        let s1 = "Test";
+        let s2 = "Test";
+        let s3 = "Uhoh";
+        let k = 4;
+
+        assert_eq!(unordered_substring(s1, s2, k), Some(s1));
+        assert_eq!(unordered_substring(s1, s3, k), None);
+    }
+
+    #[test]
+    fn test_case_sensitive_unordered() {
+        let s1 = "Test";
+        let s2 = "test";
+        let k = 4;
+        let expected_substring = None;
+
+        let r = unordered_substring(s1, s2, k);
+        assert_eq!(r, expected_substring);
+    }
+
+    // These tests use proptest to do some light fuzzing
+    proptest! {
+        #[test]
+        // Tests behavior when at least one string is shorter than k
+        fn test_shorter_strings_unordered((s1, s2, k) in strings_one_shorter_than_k(Some(1..10), Some(0..20))) {
+            let expected_substring = None;
+
+            let r = unordered_substring(&s1, &s2, k);
+            assert_eq!(r, expected_substring);
+        }
+
+        #[test]
+        // Tests behavior against correctness oracle
+        fn test_against_oracle_unordered(
+            s1 in string_in_range(0..20),
+            s2 in string_in_range(0..20),
+            k in 1..10usize,
+        ) {
+            let r = substring(&s1, &s2, k);
+            match r {
+                None => assert_eq!(r, substring_reference_impl(&s1, &s2, k)),
+                Some(sub) => assert_eq!(unordered_substring_correct(sub, &s1, &s2, k), true),
+            };
         }
     }
 
