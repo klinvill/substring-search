@@ -3,13 +3,15 @@ pub mod helpers;
 use std::collections::{HashSet, VecDeque};
 use std::str::CharIndices;
 use rustc_hash::FxHashSet;
+use hashbrown::raw::RawTable;
+use adler32::RollingAdler32;
 
 /// Given two strings, returns the first found common substring of length k or None if no such
 /// substring exists.
 ///
 /// This function uses a hashmap (as per the assignment guidelines).
 pub fn substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
-    _naive_prereserve_iter_fx_substring(s1, s2, k)
+    _naive_prereserve_iter_fx_shorter_substring(s1, s2, k)
 }
 
 /// Given two strings, returns the a common substring of length k or None if no such substring
@@ -379,6 +381,118 @@ pub fn _naive_prereserve_iter_fx_shorter_substring<'a>(s1: &'a str, s2: &'a str,
     return None;
 }
 
+// Returns a function that, when called, returns the next substring of length k from `source` and
+// its computed hash value.
+pub(crate) fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+    let mut cs = source.char_indices();
+
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()). It stores tuples of (c, i) where c is the character ending at index i.
+    let mut prev_chars: VecDeque<(&str, usize)> = VecDeque::with_capacity(k+1);
+    let mut prev_i = 0;
+
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i, _) = cs.next().unwrap();
+        prev_chars.push_back((&source[prev_i..i], i));
+        prev_i = i;
+    }
+
+    let mut hash = RollingAdler32::from_buffer(source[..prev_i].as_bytes());
+
+    Box::new(move || {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        let next_char = &source[prev_i..i];
+        let (old_char, old_offset) = prev_chars.pop_front().unwrap();
+        prev_chars.push_back((next_char, i));
+        old_char.bytes().enumerate().for_each(|(i, b)| {
+            hash.remove(prev_i - old_offset + old_char.len() - i, b)
+        });
+        hash.update_buffer(next_char.as_bytes());
+        prev_i = i;
+        (&source[old_offset..i], hash.hash() as u64)
+    })
+}
+
+/// Naive implementation of substring search. Sticks all k-length substrings of the shortest string
+/// in a hashmap, then checks all the k-length substrings in the other string to see if any are
+/// already in the hashmap. Runs in ~O(n) time (n-k+1 insertions for substrings in the shorter
+/// string (where n is the length of the string), up to n-k+1 queries for substrings in the other
+/// string (where n is the length of the string)). This function pre-reserves the needed size of
+/// the hash table up front so rehashing is not needed. It also uses the char_indices() iterator
+/// directly instead of copying it to a vec for better performance. This function also uses the
+/// rolling adler32 hashing algorithm to attempt to improve hashing performance for sliding windows.
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _naive_prereserve_iter_rolling_adler_shorter_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // Trivial to have matching substrings of length 0
+    if k == 0 {
+        // In this case we opt to return the empty string. Another implementation could return None
+        // instead.
+        return Some("");
+    }
+
+    // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
+    // the UTF-8 characters (unicode scalar values). We also keep track of the original indices in
+    // s1 and s2 so we can more efficiently get substrings (without having to create new strings).
+    // We use the iterators directly instead of extracting to a vec for better performance.
+    let cs1_len = s1.chars().count();
+    let cs2_len = s2.chars().count();
+
+    // Impossible to have a substring longer than the original strings.
+    if cs1_len < k || cs2_len < k {
+        return None;
+    }
+
+    // Choose shorter string to be the one we store in the hash table
+    let (shorter, longer) = if cs1_len <= cs2_len {(s1, s2)} else {(s2, s1)};
+    let (cs_short_len, cs_long_len) = if cs1_len <= cs2_len {(cs1_len, cs2_len)} else {(cs2_len, cs1_len)};
+
+    // Note: we reserve space to guarantee that the hash map can hold at least `capacity` elements
+    // without reallocating.
+    // We need to use a `RawTable` to ensure that we can re-use our previously computed rolling
+    // hash. The standard hash table will just recompute the rolling hash from scratch (I think).
+    let mut substrings = RawTable::with_capacity(cs_short_len);
+
+    let mut short_sub_fn = build_rolling_substring(shorter, k);
+    let mut long_sub_fn = build_rolling_substring(longer, k);
+
+    /// Ensures that a single closure type across uses of this which, in turn prevents multiple
+    /// instances of any functions like RawTable::reserve from being generated. Taken from hashbrown.
+    #[inline]
+    fn equivalent_key<Q, K, V>(k: &Q) -> impl Fn(&(K, V)) -> bool + '_
+        where
+            K: core::borrow::Borrow<Q>,
+            Q: ?Sized + Eq,
+    {
+        move |x| k.eq(x.0.borrow())
+    }
+
+    for _ in k..cs_short_len+1 {
+        let (sub, hash) = short_sub_fn();
+        // We want to use a hash set, so we only insert into the table if it's not already in there.
+        if substrings.find(hash, equivalent_key(sub)).is_none() {
+            substrings.try_insert_no_grow(hash, (sub, ())).unwrap();
+        }
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(short_sub_fn().0.chars().count() < k);
+
+    for _ in k..cs_long_len+1 {
+        let (sub, hash) = long_sub_fn();
+        if substrings.find(hash, equivalent_key(&sub)).is_some() {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub);
+        }
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(long_sub_fn().0.chars().count() < k);
+
+    // No substring of length k in s2 is also in s1.
+    return None;
+}
+
 /// Implementation of substring search that uses two hash tables to store seen substrings. It
 /// alternates between insertion and checking for each of the two strings with the idea that
 /// matching substrings may often be found early in very long strings. As a result, fewer insertions
@@ -501,20 +615,34 @@ pub fn _alternate_prereserve_iter_fx_substring<'a>(s1: &'a str, s2: &'a str, k: 
 #[cfg(test)]
 mod tests {
     use std::ops::Range;
+    use adler32::RollingAdler32;
     use substring::Substring;
     use proptest::prelude::*;
-    use crate::{substring, unordered_substring};
+    use crate::{build_rolling_substring, substring, unordered_substring};
+
+    // Current implementation uses the shortest first (to insert into the hash table)
+    const SHORTEST_FIRST: bool = true;
 
     // Reference implementation for substring to compare against for correctness
-    fn substring_reference_impl<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    fn substring_reference_impl<'a>(s1: &'a str, s2: &'a str, k: usize, shortest_first: bool) -> Option<&'a str> {
         // Trivial to have matching substrings of length 0
         if k == 0 {
             return Some("");
         }
 
+        // If we use the variants that hash the shortest string into the table, we need to make sure
+        // our reference implementation does the same since it can affect the order in which
+        // substrings are returned.
+        let (_s1, _s2) = if shortest_first {
+            if s1.len() <= s2.len() { (s1, s2) }
+            else { (s2, s1) }
+        } else {
+            (s1, s2)
+        };
+
         // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
         // the UTF-8 characters (unicode scalar values).
-        let s2_n_chars = s2.chars().count();
+        let s2_n_chars = _s2.chars().count();
 
         // Impossible to have a substring longer than the original strings.
         if s2_n_chars < k {
@@ -522,9 +650,9 @@ mod tests {
         }
 
         for i in 0..(s2_n_chars-k+1) {
-            let sub = s2.substring(i,i+k);
+            let sub = _s2.substring(i,i+k);
             // In this reference implementation we return the first substring in s2 which appears in s1.
-            if s1.contains(sub) {
+            if _s1.contains(sub) {
                 return Some(sub)
             }
         }
@@ -663,7 +791,7 @@ mod tests {
             s2 in string_in_range(0..20),
             k in 1..10usize,
         ) {
-            let expected_substring = substring_reference_impl(&s1, &s2, k);
+            let expected_substring = substring_reference_impl(&s1, &s2, k, SHORTEST_FIRST);
             let r = substring(&s1, &s2, k);
             assert_eq!(r, expected_substring);
         }
@@ -755,10 +883,38 @@ mod tests {
         ) {
             let r = substring(&s1, &s2, k);
             match r {
-                None => assert_eq!(r, substring_reference_impl(&s1, &s2, k)),
+                None => assert_eq!(r, substring_reference_impl(&s1, &s2, k, SHORTEST_FIRST)),
                 Some(sub) => assert_eq!(unordered_substring_correct(sub, &s1, &s2, k), true),
             };
         }
     }
 
+    #[test]
+    // Sanity check to make sure the rolling adler hash works as I expect. That is, removing the
+    // first element and adding another element should produce the same hash as if you hashed those
+    // same elements (in the same order) to begin with.
+    fn test_adler32_rolling() {
+        let s = "This is a test string. - Normal Person";
+        // Testing with window size of 5
+        let mut hash = RollingAdler32::from_buffer(s[0..5].as_bytes());
+        hash.remove(5, s[0..1].as_bytes()[0]);
+        hash.update(s[5..6].as_bytes()[0]);
+        assert_eq!(hash.hash(), RollingAdler32::from_buffer(s[1..6].as_bytes()).hash());
+    }
+
+    #[test]
+    fn test_rolling_next_substring() {
+        // Test string that includes multi-byte characters.
+        let s = "›It costs €10 for this item…";
+        let k = 5;
+        let mut next_substring = build_rolling_substring(s, k);
+
+        for i in 0..s.len() - k {
+            let expected_sub = s.chars().skip(i).take(k).collect::<String>();
+            assert_eq!(
+                next_substring(),
+                (expected_sub.as_str(), RollingAdler32::from_buffer(expected_sub.as_bytes()).hash() as u64)
+            );
+        }
+    }
 }

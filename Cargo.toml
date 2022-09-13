@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+adler32 = "1.2.0"
+hashbrown = { version = "0.12.3", features = ["raw"] }
 itertools = "0.10.3"
 rustc-hash = "1.1.0"
 

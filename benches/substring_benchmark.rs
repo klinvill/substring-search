@@ -3,7 +3,7 @@ use std::fs::DirEntry;
 use std::path::PathBuf;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use itertools::Itertools;
-use substring_search::{substring, _naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring};
+use substring_search::{substring, _naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring, _naive_prereserve_iter_rolling_adler_shorter_substring};
 use substring_search::helpers::preprocess_string;
 
 #[derive(Clone)]
@@ -103,6 +103,11 @@ pub fn bench_substring_impls<'a>(c: &mut Criterion) {
         let s2 = "Here be another test string. Yaargh. - Pirate";
         _naive_prereserve_iter_fx_shorter_substring(black_box(s1), black_box(s2), black_box(5))
     }));
+    group.bench_function(BenchmarkId::new("naive_prereserve_iter_rolling_adler_shorter_substring", "simple"), |b| b.iter(|| {
+        let s1 = "This is a test string. - Normal Person";
+        let s2 = "Here be another test string. Yaargh. - Pirate";
+        _naive_prereserve_iter_rolling_adler_shorter_substring(black_box(s1), black_box(s2), black_box(5))
+    }));
     group.bench_function(BenchmarkId::new("alternate_prereserve_iter_fx_substring", "simple"), |b| b.iter(|| {
         let s1 = "This is a test string. - Normal Person";
         let s2 = "Here be another test string. Yaargh. - Pirate";
@@ -114,48 +119,59 @@ pub fn bench_substring_impls<'a>(c: &mut Criterion) {
         // functions themselves) to preserve generality.
         let s1 = preprocess_string(&std::fs::read_to_string(f1.path.clone()).unwrap());
         let s2 = preprocess_string(&std::fs::read_to_string(f2.path.clone()).unwrap());
-        group.bench_with_input(
-            BenchmarkId::new("naive_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _naive_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
-        group.bench_with_input(
-            BenchmarkId::new("naive_prereserve_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _naive_prereserve_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
-        group.bench_with_input(
-            BenchmarkId::new("naive_prereserve_iter_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _naive_prereserve_iter_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
-        group.bench_with_input(
-            BenchmarkId::new("naive_prereserve_iter_fx_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _naive_prereserve_iter_fx_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
-        group.bench_with_input(
-            BenchmarkId::new("naive_prereserve_iter_fx_shorter_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _naive_prereserve_iter_fx_shorter_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
-        group.bench_with_input(
-            BenchmarkId::new("alternate_prereserve_iter_fx_substring", &format!("{}_{}", f1.name, f2.name)),
-            &(&s1, &s2),
-            |b, (s_1, s_2)| b.iter(|| {
-                _alternate_prereserve_iter_fx_substring(black_box(s_1), black_box(s_2), black_box(20))
-            })
-        );
+
+        // Note: 320 characters should be enough to make sure the project gutenberg headers don't trivially match
+        for k in [5, 10, 20, 40, 80, 160, 320] {
+            group.bench_with_input(
+                BenchmarkId::new("naive_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("naive_prereserve_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_prereserve_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("naive_prereserve_iter_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_prereserve_iter_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("naive_prereserve_iter_fx_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_prereserve_iter_fx_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("naive_prereserve_iter_fx_shorter_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_prereserve_iter_fx_shorter_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("naive_prereserve_iter_rolling_adler_shorter_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _naive_prereserve_iter_rolling_adler_shorter_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+            group.bench_with_input(
+                BenchmarkId::new("alternate_prereserve_iter_fx_substring", &format!("{}_{}_{}", f1.name, f2.name, k)),
+                &(&s1, &s2),
+                |b, (s_1, s_2)| b.iter(|| {
+                    _alternate_prereserve_iter_fx_substring(black_box(s_1), black_box(s_2), black_box(k))
+                })
+            );
+        }
     }
 }
 
