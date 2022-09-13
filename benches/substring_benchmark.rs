@@ -3,7 +3,8 @@ use std::fs::DirEntry;
 use std::path::PathBuf;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use itertools::Itertools;
-use substring_search::{substring, _naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring, _naive_prereserve_iter_rolling_adler_shorter_substring};
+use substring_search::substring;
+use substring_search::implementations::{_naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring, _naive_prereserve_iter_rolling_adler_shorter_substring};
 use substring_search::helpers::preprocess_string;
 
 #[derive(Clone)]
