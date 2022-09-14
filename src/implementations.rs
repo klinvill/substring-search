@@ -1,6 +1,7 @@
 use std::collections::{HashSet, VecDeque};
+use std::hash::Hasher;
 use std::str::CharIndices;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHasher, FxHashSet};
 use hashbrown::raw::RawTable;
 use adler32::RollingAdler32;
 use crate::hashers::RollingPolynomial;
@@ -357,7 +358,7 @@ pub fn _naive_prereserve_iter_fx_shorter_substring<'a>(s1: &'a str, s2: &'a str,
 
 // Returns a function that, when called, returns the next substring of length k from `source` and
 // its computed hash value.
-pub(crate) fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+pub fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
     let mut cs = source.char_indices();
 
     // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
@@ -392,7 +393,7 @@ pub(crate) fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn 
 
 // Returns a function that, when called, returns the next substring of length k from `source` and
 // its computed hash value.
-pub(crate) fn build_rolling_polynomial_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+pub fn build_rolling_polynomial_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
     let mut cs = source.char_indices();
 
     // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
@@ -422,6 +423,80 @@ pub(crate) fn build_rolling_polynomial_substring<'b>(source: &'b str, k: usize) 
         hash.update_buffer(next_char.as_bytes());
         prev_i = i;
         (&source[old_offset..i], hash.hash() as u64)
+    })
+}
+
+// Returns a function that, when called, returns the next substring of length k from `source` and
+// its computed hash value.
+pub fn build_fx_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+    let mut cs = source.char_indices();
+
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()). It stores tuples of (c, i) where c is the character ending at index i.
+    let mut prev_chars: VecDeque<(&str, usize)> = VecDeque::with_capacity(k+1);
+    let mut prev_i = 0;
+
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i, _) = cs.next().unwrap();
+        prev_chars.push_back((&source[prev_i..i], i));
+        prev_i = i;
+    }
+
+    #[inline]
+    fn hash(s: &str) -> u64 {
+        let mut hasher = FxHasher::default();
+        hasher.write(s.as_bytes());
+        hasher.finish()
+    }
+
+    Box::new(move || {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        let next_char = &source[prev_i..i];
+        let (old_char, old_offset) = prev_chars.pop_front().unwrap();
+        prev_chars.push_back((next_char, i));
+        prev_i = i;
+        let sub = &source[old_offset..i];
+        (sub, hash(sub))
+    })
+}
+
+// Returns a function that, when called, returns the next substring of length k from `source` and
+// its computed hash value.
+pub fn build_sip_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+    let mut cs = source.char_indices();
+
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()). It stores tuples of (c, i) where c is the character ending at index i.
+    let mut prev_chars: VecDeque<(&str, usize)> = VecDeque::with_capacity(k+1);
+    let mut prev_i = 0;
+
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i, _) = cs.next().unwrap();
+        prev_chars.push_back((&source[prev_i..i], i));
+        prev_i = i;
+    }
+
+    #[inline]
+    fn hash(s: &str) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::default();
+        hasher.write(s.as_bytes());
+        hasher.finish()
+    }
+
+    Box::new(move || {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        let next_char = &source[prev_i..i];
+        let (old_char, old_offset) = prev_chars.pop_front().unwrap();
+        prev_chars.push_back((next_char, i));
+        prev_i = i;
+        let sub = &source[old_offset..i];
+        (sub, hash(sub))
     })
 }
 
