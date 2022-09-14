@@ -7,6 +7,8 @@ mod hashers;
 ///
 /// This function uses a hashmap (as per the assignment guidelines).
 pub fn substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // The `_naive_prereserve_iter_fx_shorter_substring` function showed the best performance on
+    // smaller length substrings. For that reason we rely on it as default implementation.
     implementations::_naive_prereserve_iter_fx_shorter_substring(s1, s2, k)
 }
 
