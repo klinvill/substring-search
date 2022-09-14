@@ -9,6 +9,7 @@ edition = "2021"
 adler32 = "1.2.0"
 hashbrown = { version = "0.12.3", features = ["raw"] }
 itertools = "0.10.3"
+rand = "0.8.5"
 rustc-hash = "1.1.0"
 
 [dev-dependencies]

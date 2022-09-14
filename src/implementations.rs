@@ -3,6 +3,7 @@ use std::str::CharIndices;
 use rustc_hash::FxHashSet;
 use hashbrown::raw::RawTable;
 use adler32::RollingAdler32;
+use crate::hashers::RollingPolynomial;
 
 /// Naive implementation of substring search. Sticks all k-length substrings of first in a hashmap,
 /// then checks all the k-length substrings in s2 to see if any are already in the hashmap. Runs
@@ -389,6 +390,41 @@ pub(crate) fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn 
     })
 }
 
+// Returns a function that, when called, returns the next substring of length k from `source` and
+// its computed hash value.
+pub(crate) fn build_rolling_polynomial_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+    let mut cs = source.char_indices();
+
+    // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
+    // push_back()). It stores tuples of (c, i) where c is the character ending at index i.
+    let mut prev_chars: VecDeque<(&str, usize)> = VecDeque::with_capacity(k+1);
+    let mut prev_i = 0;
+
+    // Pre-loads the indices for the first substring
+    for _ in 0..k {
+        let (i, _) = cs.next().unwrap();
+        prev_chars.push_back((&source[prev_i..i], i));
+        prev_i = i;
+    }
+
+    let mut hash = RollingPolynomial::from_buffer(source[..prev_i].as_bytes());
+
+    Box::new(move || {
+        // Normally we want to read the bytes up until the start of the next character, but when
+        // we've reached past the end of the string, it suffices to just read the rest of the string.
+        let (i, _) = cs.next().unwrap_or((source.len(), 'a'));
+        let next_char = &source[prev_i..i];
+        let (old_char, old_offset) = prev_chars.pop_front().unwrap();
+        prev_chars.push_back((next_char, i));
+        old_char.bytes().enumerate().for_each(|(i, b)| {
+            hash.remove((prev_i - old_offset + old_char.len() - i) as u32, b)
+        });
+        hash.update_buffer(next_char.as_bytes());
+        prev_i = i;
+        (&source[old_offset..i], hash.hash() as u64)
+    })
+}
+
 /// Naive implementation of substring search. Sticks all k-length substrings of the shortest string
 /// in a hashmap, then checks all the k-length substrings in the other string to see if any are
 /// already in the hashmap. Runs in ~O(n) time (n-k+1 insertions for substrings in the shorter
@@ -430,6 +466,83 @@ pub fn _naive_prereserve_iter_rolling_adler_shorter_substring<'a>(s1: &'a str, s
 
     let mut short_sub_fn = build_rolling_substring(shorter, k);
     let mut long_sub_fn = build_rolling_substring(longer, k);
+
+    /// Ensures that a single closure type across uses of this which, in turn prevents multiple
+    /// instances of any functions like RawTable::reserve from being generated. Taken from hashbrown.
+    #[inline]
+    fn equivalent_key<Q, K, V>(k: &Q) -> impl Fn(&(K, V)) -> bool + '_
+        where
+            K: core::borrow::Borrow<Q>,
+            Q: ?Sized + Eq,
+    {
+        move |x| k.eq(x.0.borrow())
+    }
+
+    for _ in k..cs_short_len+1 {
+        let (sub, hash) = short_sub_fn();
+        // We want to use a hash set, so we only insert into the table if it's not already in there.
+        if substrings.find(hash, equivalent_key(sub)).is_none() {
+            substrings.try_insert_no_grow(hash, (sub, ())).unwrap();
+        }
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(short_sub_fn().0.chars().count() < k);
+
+    for _ in k..cs_long_len+1 {
+        let (sub, hash) = long_sub_fn();
+        if substrings.find(hash, equivalent_key(&sub)).is_some() {
+            // Substring found in both s1 and s2, can return early.
+            return Some(sub);
+        }
+    }
+    // Sanity check to make sure we've read all the characters
+    assert!(long_sub_fn().0.chars().count() < k);
+
+    // No substring of length k in s2 is also in s1.
+    return None;
+}
+
+/// Naive implementation of substring search. Sticks all k-length substrings of the shortest string
+/// in a hashmap, then checks all the k-length substrings in the other string to see if any are
+/// already in the hashmap. Runs in ~O(n) time (n-k+1 insertions for substrings in the shorter
+/// string (where n is the length of the string), up to n-k+1 queries for substrings in the other
+/// string (where n is the length of the string)). This function pre-reserves the needed size of
+/// the hash table up front so rehashing is not needed. It also uses the char_indices() iterator
+/// directly instead of copying it to a vec for better performance. This function also uses a
+/// rolling polynomial hash to attempt to improve hashing performance for sliding windows.
+#[deprecated = "The implementations shouldn't be called directly. Call substring() instead."]
+pub fn _naive_prereserve_iter_rolling_poly_shorter_substring<'a>(s1: &'a str, s2: &'a str, k: usize) -> Option<&'a str> {
+    // Trivial to have matching substrings of length 0
+    if k == 0 {
+        // In this case we opt to return the empty string. Another implementation could return None
+        // instead.
+        return Some("");
+    }
+
+    // Since strings are essentially lists of UTF-8 bytes in Rust, we instead want to iterate over
+    // the UTF-8 characters (unicode scalar values). We also keep track of the original indices in
+    // s1 and s2 so we can more efficiently get substrings (without having to create new strings).
+    // We use the iterators directly instead of extracting to a vec for better performance.
+    let cs1_len = s1.chars().count();
+    let cs2_len = s2.chars().count();
+
+    // Impossible to have a substring longer than the original strings.
+    if cs1_len < k || cs2_len < k {
+        return None;
+    }
+
+    // Choose shorter string to be the one we store in the hash table
+    let (shorter, longer) = if cs1_len <= cs2_len {(s1, s2)} else {(s2, s1)};
+    let (cs_short_len, cs_long_len) = if cs1_len <= cs2_len {(cs1_len, cs2_len)} else {(cs2_len, cs1_len)};
+
+    // Note: we reserve space to guarantee that the hash map can hold at least `capacity` elements
+    // without reallocating.
+    // We need to use a `RawTable` to ensure that we can re-use our previously computed rolling
+    // hash. The standard hash table will just recompute the rolling hash from scratch (I think).
+    let mut substrings = RawTable::with_capacity(cs_short_len);
+
+    let mut short_sub_fn = build_rolling_polynomial_substring(shorter, k);
+    let mut long_sub_fn = build_rolling_polynomial_substring(longer, k);
 
     /// Ensures that a single closure type across uses of this which, in turn prevents multiple
     /// instances of any functions like RawTable::reserve from being generated. Taken from hashbrown.

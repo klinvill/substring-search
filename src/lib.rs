@@ -1,5 +1,6 @@
 pub mod helpers;
 pub mod implementations;
+mod hashers;
 
 /// Given two strings, returns the first found common substring of length k or None if no such
 /// substring exists.
