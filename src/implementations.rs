@@ -358,7 +358,7 @@ pub fn _naive_prereserve_iter_fx_shorter_substring<'a>(s1: &'a str, s2: &'a str,
 
 // Returns a function that, when called, returns the next substring of length k from `source` and
 // its computed hash value.
-pub fn build_rolling_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
+pub fn build_rolling_adler_substring<'b>(source: &'b str, k: usize) -> Box<dyn FnMut() -> (&'b str, u64) + 'b> {
     let mut cs = source.char_indices();
 
     // We use a Deque so we can quickly slide a window along the indices (using pop_front() and
@@ -539,8 +539,8 @@ pub fn _naive_prereserve_iter_rolling_adler_shorter_substring<'a>(s1: &'a str, s
     // hash. The standard hash table will just recompute the rolling hash from scratch (I think).
     let mut substrings = RawTable::with_capacity(cs_short_len);
 
-    let mut short_sub_fn = build_rolling_substring(shorter, k);
-    let mut long_sub_fn = build_rolling_substring(longer, k);
+    let mut short_sub_fn = build_rolling_adler_substring(shorter, k);
+    let mut long_sub_fn = build_rolling_adler_substring(longer, k);
 
     /// Ensures that a single closure type across uses of this which, in turn prevents multiple
     /// instances of any functions like RawTable::reserve from being generated. Taken from hashbrown.
@@ -776,7 +776,7 @@ pub fn _alternate_prereserve_iter_fx_substring<'a>(s1: &'a str, s2: &'a str, k: 
 #[cfg(test)]
 mod tests {
     use adler32::RollingAdler32;
-    use crate::implementations::build_rolling_substring;
+    use crate::implementations::build_rolling_adler_substring;
 
     #[test]
     // Sanity check to make sure the rolling adler hash works as I expect. That is, removing the
@@ -796,7 +796,7 @@ mod tests {
         // Test string that includes multi-byte characters.
         let s = "›It costs €10 for this item…";
         let k = 5;
-        let mut next_substring = build_rolling_substring(s, k);
+        let mut next_substring = build_rolling_adler_substring(s, k);
 
         for i in 0..s.len() - k {
             let expected_sub = s.chars().skip(i).take(k).collect::<String>();

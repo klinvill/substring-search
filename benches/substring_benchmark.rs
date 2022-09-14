@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use itertools::Itertools;
 use substring_search::substring;
-use substring_search::implementations::{_naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring, _naive_prereserve_iter_rolling_adler_shorter_substring, build_fx_substring, build_rolling_substring, build_sip_substring, build_rolling_polynomial_substring, _naive_prereserve_iter_rolling_poly_shorter_substring};
+use substring_search::implementations::{_naive_substring, _naive_prereserve_substring, _naive_prereserve_iter_substring, _naive_prereserve_iter_fx_substring, _naive_prereserve_iter_fx_shorter_substring, _alternate_prereserve_iter_fx_substring, _naive_prereserve_iter_rolling_adler_shorter_substring, build_fx_substring, build_rolling_adler_substring, build_sip_substring, build_rolling_polynomial_substring, _naive_prereserve_iter_rolling_poly_shorter_substring};
 use substring_search::helpers::preprocess_string;
 
 #[derive(Clone)]
@@ -233,7 +233,7 @@ pub fn bench_hashes<'a>(c: &mut Criterion) {
     group.bench_function(BenchmarkId::new("rolling_adler", "simple_5"), |b| b.iter(|| {
         let s1 = "This is a test string. - Normal Person";
         let k = 5;
-        let mut sub_fn = build_rolling_substring(black_box(s1), black_box(k));
+        let mut sub_fn = build_rolling_adler_substring(black_box(s1), black_box(k));
         for _ in 0..s1.len() - k {
             sub_fn();
         }
@@ -278,7 +278,7 @@ pub fn bench_hashes<'a>(c: &mut Criterion) {
                 BenchmarkId::new("rolling_adler", &format!("{}_{}", f.name, k)),
                 &s,
                 |b, s| b.iter(|| {
-                    let mut sub_fn = build_rolling_substring(black_box(s), black_box(k));
+                    let mut sub_fn = build_rolling_adler_substring(black_box(s), black_box(k));
                     for _ in 0..s.len() - k {
                         sub_fn();
                     }

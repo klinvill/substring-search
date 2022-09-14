@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use substring_search::has_substring;
 use substring_search::helpers::preprocess_string;
 
-use substring_search::implementations::{build_fx_substring, build_rolling_polynomial_substring, build_rolling_substring, build_sip_substring};
+use substring_search::implementations::{build_fx_substring, build_rolling_polynomial_substring, build_rolling_adler_substring, build_sip_substring};
 
 /// This function is used to test for frequency of collisions for hash functions. Unit tests are
 /// found in the rust files themselves.
@@ -14,7 +14,7 @@ fn check_collisions<'b>() {
         let builder_fns: HashMap<_, _> = HashMap::from([
             ("sip", build_sip_substring(&s, k)),
             ("fx", build_fx_substring(&s, k)),
-            ("rolling_adler", build_rolling_substring(&s, k)),
+            ("rolling_adler", build_rolling_adler_substring(&s, k)),
             ("rolling_poly", build_rolling_polynomial_substring(&s, k)),
         ]);
 
