@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use substring_search::has_substring;
+use substring_search::substring;
 use substring_search::helpers::preprocess_string;
 
 use substring_search::implementations::{build_fx_substring, build_rolling_polynomial_substring, build_rolling_adler_substring, build_sip_substring};
@@ -42,7 +42,7 @@ fn main() {
     let s2 = std::fs::read_to_string("./data/Tolstoy/anna_karenina_tolstoy.txt").unwrap();
     // let s1 = std::fs::read_to_string("./data/genomes/bacterial_genome_1.txt").unwrap();
     // let s2 = std::fs::read_to_string("./data/genomes/monkeypox-genome.txt").unwrap();
-    println!("Common substring?: {}", has_substring(&s1, &s2, 20));
+    println!("Common substring: {:?}", substring(&s1, &s2, 20));
 
     // check_collisions()
 }

@@ -16,6 +16,8 @@ impl RollingPolynomial {
         let mut salt = random::<u8>() as u64;
         // Ensure the salt isn't 0 or 1, otherwise our rolling hash won't work well.
         while salt < 2 {
+            // We only generate a byte-long random salt since it is used as an exponent which can
+            // blow up quickly
             salt = random::<u8>() as u64;
         }
         RollingPolynomial {
