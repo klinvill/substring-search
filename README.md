@@ -4,10 +4,11 @@ k in two input substrings. It also contains benchmarks and analysis code to eval
 different common substring implementations.
 
 ## Running the code
-To run this project, you first need to install Rust and Cargo. If you also want to generate the plots from the
-benchmarks, you will also need to install python and the packages mentioned in `analysis/requirements.txt`. You can
-install the required packages by running the command `pip install -r analysis/requirements.txt` from this directory. I
-highly recommend using a conda environment from the anaconda project (https://anaconda.org/).
+To run this project, you first need to install Rust and Cargo. The recommended way to install Rust is through rustup
+(https://rustup.rs/). If you also want to generate the plots from the benchmarks, you will also need to install python
+and the packages mentioned in `analysis/requirements.txt`. You can install the required packages by running the command
+`pip install -r analysis/requirements.txt` from this directory. I highly recommend using a conda environment from the
+anaconda project (https://anaconda.org/).
 
 ### Running Tests
 Once you have Rust and Cargo installed, you can run the tests by running `cargo test` from this directory.
