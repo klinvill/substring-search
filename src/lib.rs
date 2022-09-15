@@ -51,7 +51,7 @@ mod tests {
         // our reference implementation does the same since it can affect the order in which
         // substrings are returned.
         let (_s1, _s2) = if shortest_first {
-            if s1.len() <= s2.len() { (s1, s2) }
+            if s1.chars().count() <= s2.chars().count() { (s1, s2) }
             else { (s2, s1) }
         } else {
             (s1, s2)
