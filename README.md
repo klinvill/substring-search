@@ -1,7 +1,7 @@
 # Common Substring Search
 This project contains a Rust library (and simple example binary) that can be used to find a common substring of length
 k in two input substrings. It also contains benchmarks and analysis code to evaluate and plot the performance of 
-different common substring implementations.
+different common substring implementations. It was developed for a class on advanced data structures.
 
 ## Running the code
 To run this project, you first need to install Rust and Cargo. The recommended way to install Rust is through rustup
@@ -24,3 +24,17 @@ read in "War and Peace" and "Anna Karenina" and print out the first common subst
 ### Generating Plots from Benchmarks
 Once you have python and the packages required, you can generate the plots by running `python plots.py` from the
 analysis directory.
+
+
+## Implementation Performance
+The alternating algorithm (used for `_alternate_prereserve_iter_fx_substring`) performs the best when a common
+substring is very early in both input strings. The implementation with the custom rolling hash
+(`_prereserve_iter_rolling_poly_shorter_substring`) performs the best for larger values of k (on strings that don't
+draw from a very limited vocabulary like DNA bases). Otherwise, the implementation using the rustc fx hash
+(`_prereserve_iter_fx_shorter_substring`) performs the best. A few select plots are shown below. They were generated
+using the data from the criterion benchmarks and plotted using seaborne which shows 95% confidence intervals as a
+shaded region. The code to generate these plots is in `analysis/plots.py`.
+
+![](analysis/impls_hemingway-stories-poems.txt_hemingway-in-our-time.txt_without_adler.png)
+![](analysis/impls_war_and_peace_tolstoy.txt_anna_karenina_tolstoy.txt_without_adler.png)
+![](analysis/impls_bacterial_genome_2.txt_monkeypox-genome.txt_without_adler.png)
