@@ -3,6 +3,8 @@ This project contains a Rust library (and simple example binary) that can be use
 k in two input substrings. It also contains benchmarks and analysis code to evaluate and plot the performance of 
 different common substring implementations. It was developed for a class on advanced data structures.
 
+The full writeup for this assignment can be found in [report/substring\_search\_writeup.pdf](report/substring_search_writeup.pdf).
+
 ## Running the code
 To run this project, you first need to install Rust and Cargo. The recommended way to install Rust is through rustup
 (https://rustup.rs/). If you also want to generate the plots from the benchmarks, you will also need to install python
